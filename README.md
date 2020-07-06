@@ -5,15 +5,20 @@ Code for assessing the land system impacts of institutional shifts in Cuba that 
 
 # Software Requirements:
 R version 3.6.3
+
 Google Earth Engine (JavaScript API)
+
 Python 2.7.16/ArcMap 10.7.1 (arcpy)
 
 # Data
 
 ### Accessed via Google Earth Engine 
 USGS Landsat 5 TM Collection 1 Tier 1 Raw Scenes
+
 DMSP OLS: Global Radiance-Calibrated Nighttime Lights Version 4, Defense Meteorological Program Operational Linescan System
+
 SRTM Digital Elevation Data 30m
+
 CHIRPS Daily: Climate Hazards Group InfraRed Precipitation with Station Data (version 2.0)
 
 ### Land Use/Land Cover Classification
