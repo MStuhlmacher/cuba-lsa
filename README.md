@@ -23,9 +23,8 @@ SRTM Digital Elevation Data 30m
 CHIRPS Daily: Climate Hazards Group InfraRed Precipitation with Station Data (version 2.0)
 
 ### Land Use/Land Cover Classification
-![alt text](images/CubaLULC_2020.03.06.png "LULC Maps")
-
 Land Use/Land Cover (LULC) classifications TIFs available in the "LULC" folder.
+![alt text](images/CubaLULC_2020.03.06.png "LULC Maps")
 
 # Analysis
 
