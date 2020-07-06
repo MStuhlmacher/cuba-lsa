@@ -1,0 +1,980 @@
+---
+title: "Cuba Land System Architecture (LSA) Code"
+author: "Michelle Stuhlmacher"
+date: "May 15, 2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+require("knitr")
+knitr::opts_chunk$set(echo = TRUE)
+
+#set working directory
+opts_knit$set(root.dir = "path/to/files")
+```
+
+This is an R Markdown document with all of the code for the Cuba chapter of my dissertation. 
+For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document.
+
+```{r import libraries, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(dplyr)
+library(raster)
+library(networkD3)
+library(rgdal)
+library(moments)
+library(FSA)
+library(gridExtra)
+```
+
+```{r import data}
+#environmental results per patch
+ev1985 = read.csv('./Data/EnvironVars/1985/EnvironVars1985.csv', header = TRUE)
+ev1990 = read.csv('./Data/EnvironVars/1990/EnvironVars1990.csv', header = TRUE)
+ev1995 = read.csv('./Data/EnvironVars/1995/EnvironVars1995.csv', header = TRUE)
+ev2000 = read.csv('./Data/EnvironVars/2000/EnvironVars2000.csv', header = TRUE)
+ev2005 = read.csv('./Data/EnvironVars/2005/EnvironVars2005.csv', header = TRUE)
+ev2010 = read.csv('./Data/EnvironVars/2010/EnvironVars2010.csv', header = TRUE)
+
+#CHIRPS precipitation data
+precipMean = read.csv('./Data/EnvironVars/Precip/CHIRPS_1984_2011_mean.csv',header = TRUE)
+
+#fragstats metrics (patch values)
+frag = read.csv('./MetricCalc/FRAGSTATS/Output/Cuba_Rlandscapemetrics_patch.csv',header = TRUE)
+
+#set class and year as factor
+frag$class = as.factor(frag$class)
+frag$Year = as.factor(frag$Year)
+
+#subset by metric
+area = subset(frag,metric=='area')
+circle = subset(frag,metric=='circle')
+shape = subset(frag,metric=='shape')
+contig = subset(frag,metric=='contig')
+enn = subset(frag,metric=='enn')
+frac = subset(frag,metric=='frac')
+gyrate = subset(frag,metric=='gyrate')
+para = subset(frag,metric=='para')
+
+#subset by class
+area_1 = subset(area,class==1)
+area_2 = subset(area,class==2)
+area_3 = subset(area,class==3)
+area_4 = subset(area,class==4)
+
+circle_1 = subset(circle,class==1)
+circle_2 = subset(circle,class==2)
+circle_3 = subset(circle,class==3)
+circle_4 = subset(circle,class==4)
+
+shape_1 = subset(shape,class==1)
+shape_2 = subset(shape,class==2)
+shape_3 = subset(shape,class==3)
+shape_4 = subset(shape,class==4)
+
+contig_1 = subset(contig,class==1)
+contig_2 = subset(contig,class==2)
+contig_3 = subset(contig,class==3)
+contig_4 = subset(contig,class==4)
+
+enn_1 = subset(enn,class==1)
+enn_2 = subset(enn,class==2)
+enn_3 = subset(enn,class==3)
+enn_4 = subset(enn,class==4)
+
+frac_1 = subset(frac,class==1)
+frac_2 = subset(frac,class==2)
+frac_3 = subset(frac,class==3)
+frac_4 = subset(frac,class==4)
+
+gyrate_1 = subset(gyrate,class==1)
+gyrate_2 = subset(gyrate,class==2)
+gyrate_3 = subset(gyrate,class==3)
+gyrate_4 = subset(gyrate,class==4)
+
+para_1 = subset(para,class==1)
+para_2 = subset(para,class==2)
+para_3 = subset(para,class==3)
+para_4 = subset(para,class==4)
+```
+
+## Figure 2. LULC Class Conversion Sankey Plot
+```{r fig 2}
+#import raster files
+fileInfo = data.frame(nodeCol=1, rasterFile="./Classification/ClassifiedImages/1985/Cuba1985.tif", rasterBand=1) %>%
+  rbind(data.frame(nodeCol=2, rasterFile="./Classification/ClassifiedImages/2010/Cuba2010.tif", rasterBand=1))
+
+nodeInfo = data.frame(nodeName="Cropland"          , nodeID=0,  mapClass=1, nodeCol=1, nodeGroup='a') %>%
+  rbind(data.frame(nodeName="Barren/Grass/Shrubland", nodeID=1,  mapClass=2, nodeCol=1, nodeGroup='b')) %>%
+  rbind(data.frame(nodeName="Built-up"              , nodeID=2,  mapClass=3, nodeCol=1, nodeGroup='c')) %>%
+  rbind(data.frame(nodeName="Forest"                , nodeID=3,  mapClass=4, nodeCol=1, nodeGroup='d')) %>%
+  rbind(data.frame(nodeName="Water"                 , nodeID=4,  mapClass=6, nodeCol=1, nodeGroup='e')) %>%
+  
+  rbind(data.frame(nodeName="Cropland"              , nodeID=5,  mapClass=1, nodeCol=2, nodeGroup='a')) %>%
+  rbind(data.frame(nodeName="Barren/Grass/Shrubland", nodeID=6,  mapClass=2, nodeCol=2, nodeGroup='b')) %>%
+  rbind(data.frame(nodeName="Built-up"              , nodeID=7,  mapClass=3, nodeCol=2, nodeGroup='c')) %>%
+  rbind(data.frame(nodeName="Forest"                , nodeID=8,  mapClass=4, nodeCol=2, nodeGroup='d')) %>%
+  rbind(data.frame(nodeName="Water"                 , nodeID=9, mapClass=6, nodeCol=2, nodeGroup='e'))
+
+fontSize = 20
+nodeWidth = 30
+fontFamily = "sans-serif"
+
+nodeInfo = dplyr::left_join(nodeInfo, fileInfo, by='nodeCol')
+nodeInfo$nodeName = as.character(nodeInfo$nodeName)
+nodeInfo$rasterFile = as.character(nodeInfo$rasterFile)
+
+NodeCols <- sort(unique(nodeInfo$nodeCol))
+linkInfo <- data.frame()
+
+#Need space to allocate a 1.9 GB vector
+for(i in 1:(length(NodeCols)-1)){
+  fromCol <- dplyr::filter(nodeInfo, nodeCol==NodeCols[i])
+  toCol <- dplyr::filter(nodeInfo, nodeCol==NodeCols[i+1])
+  fromR <- values(raster(fromCol$rasterFile[1], fromCol$rasterBand[1]))
+  toR <- values(raster(toCol$rasterFile[1], toCol$rasterBand[1]))
+  for(f in 1:nrow(fromCol)){
+    for(t in 1:nrow(toCol)){
+      nFromTo <- length(which(fromR == fromCol$mapClass[f] & toR == toCol$mapClass[t]))
+      linkInfo <- rbind(linkInfo, data.frame(source=fromCol$nodeID[f], target=toCol$nodeID[t], value=nFromTo))
+    }
+  }
+}
+
+sankeyNetwork(Links = linkInfo,
+              Nodes = nodeInfo,
+              Source = "source",
+              Target = "target",
+              Value = "value",
+              NodeID = "nodeName",
+              NodeGroup = "nodeGroup",
+              fontSize = fontSize,
+              fontFamily = fontFamily,
+              nodeWidth = nodeWidth,                          #crop        #bgs   #built-up   #forest   #water
+              colourScale = paste('d3.scaleOrdinal().range(["#FFEBAF", "#898944", "#000000", "#267300", "#0084A8"])'))
+
+```
+
+## Figure 3. Average Metric Values 1985-2010
+```{r fig 3, warning=FALSE, message=FALSE}
+#take the average of each metrics for each year for each class
+areaMean = group_by(area,Year,class) %>% summarize(area_mn = mean(value))
+contigMean = group_by(contig,Year,class) %>% summarize(contig_mn = mean(value))
+ennMean = group_by(enn,Year,class) %>% summarize(enn_mn = mean(value))
+fracMean = group_by(frac,Year,class) %>% summarize(frac_mn = mean(value))
+
+#combine into one dataframe
+metricMean3 = merge(areaMean,contigMean,by=c("Year","class"))
+metricMean2 = merge(metricMean3,ennMean,by=c("Year","class"))
+metricMean = merge(metricMean2,fracMean,by=c("Year","class"))
+
+#remove class 6
+metricMean = subset(metricMean,class!=6)
+
+#add a column name with the text for each class name
+metricMean$LULC = c('Cropland',"Barren/Grass/Shrubland","Built-up","Forest")
+metricMean$LULC = as.factor(metricMean$LULC)
+
+#convert year back to a number
+metricMean$Year = as.character(metricMean$Year)
+metricMean$Year = as.numeric(metricMean$Year)
+
+#subset DF to only the years before the fall
+metricMean_bf = subset(metricMean,Year==1985 | Year == 1990)
+
+sizeG = ggplot(data = metricMean, aes(x=Year,y=area_mn, colour = LULC, fill = LULC, group = Year > 1991))+
+  ylab("AVG. PATCH AREA")+
+  theme_light() +
+  theme(legend.position = "none",
+        text = element_text(size = 18),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(face="bold"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+                              #BGS      #built-up  #crop      #forest
+  scale_color_manual(values=c("#898944","#6E6E6E","#FFEBAF","#267300"))+
+  scale_fill_manual(values=c("#898944","#6E6E6E","#FFEBAF","#267300")) +
+  geom_smooth(data = subset(metricMean,class==1), aes(x=Year,y=area_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) +
+  geom_smooth(data = subset(metricMean,class==2), aes(x=Year,y=area_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) +
+  geom_smooth(data = subset(metricMean,class==3), aes(x=Year,y=area_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) +
+  geom_smooth(data = subset(metricMean,class==4), aes(x=Year,y=area_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) +
+  geom_vline(xintercept=1991,linetype="dashed",size = 1.5)
+
+#Cropland = 255/235/175 = #FFEBAF
+#BGS = 137/137/68 = #898944
+#Built-up = 0/0/0 = #000000
+#Forest = 38/115/0 = #267300
+#Water = 0/132/168 = #0084A8
+
+contigG = ggplot(data = metricMean, aes(x=Year,y=contig_mn, colour = LULC, fill = LULC, group = Year > 1991))+
+  ylab("AVG. PATCH CONNECTIVITY")+
+  theme_light() + 
+  geom_vline(xintercept=1991,linetype="dashed",size = 1.5) + 
+  theme(legend.position = "none",
+        text = element_text(size = 18),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(face="bold"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  scale_fill_manual(values=c("#898944","#6E6E6E","#FFEBAF","#267300")) +
+  scale_color_manual(values=c("#898944","#6E6E6E","#FFEBAF","#267300"))+
+  geom_smooth(data = subset(metricMean,class==1), aes(x=Year,y=contig_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) +
+  geom_smooth(data = subset(metricMean,class==2), aes(x=Year,y=contig_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) +
+  geom_smooth(data = subset(metricMean,class==3), aes(x=Year,y=contig_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) +
+  geom_smooth(data = subset(metricMean,class==4), aes(x=Year,y=contig_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) #+
+
+distG = ggplot(data = metricMean, aes(x=Year,y=enn_mn, colour = LULC, fill = LULC, group = Year > 1991))+
+  ylab("AVG PATCH DISTANCE")+
+  theme_light() +
+  geom_vline(xintercept=1991,linetype="dashed",size = 1.5) + 
+  theme(legend.position = "none",
+        text = element_text(size = 18),
+        axis.title.y = element_text(face="bold"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  scale_color_manual(values=c("#898944","#6E6E6E","#FFEBAF","#267300"))+
+  scale_fill_manual(values=c("#898944","#6E6E6E","#FFEBAF","#267300")) +
+  geom_smooth(data = subset(metricMean,class==1), aes(x=Year,y=enn_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) +
+  geom_smooth(data = subset(metricMean,class==2), aes(x=Year,y=enn_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) +
+  geom_smooth(data = subset(metricMean,class==3), aes(x=Year,y=enn_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) +
+  geom_smooth(data = subset(metricMean,class==4), aes(x=Year,y=enn_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) #+
+
+shapeG = ggplot(data = metricMean, aes(x=Year,y=frac_mn, colour = LULC, fill = LULC, group = Year > 1991))+
+  ylab("AVG. PATCH SHAPE")+
+  #geom_point(size=2) +
+  theme_light() +
+  geom_vline(xintercept=1991,linetype="dashed",size = 1.5) + 
+  theme(legend.position = "none",
+        text = element_text(size = 18),
+        axis.title.y = element_text(face="bold"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  scale_color_manual(values=c("#898944","#6E6E6E","#FFEBAF","#267300"))+
+  scale_fill_manual(values=c("#898944","#6E6E6E","#FFEBAF","#267300")) +
+  geom_smooth(data = subset(metricMean,class==1), aes(x=Year,y=frac_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) +
+  geom_smooth(data = subset(metricMean,class==2), aes(x=Year,y=frac_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) +
+  geom_smooth(data = subset(metricMean,class==3), aes(x=Year,y=frac_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE) +
+  geom_smooth(data = subset(metricMean,class==4), aes(x=Year,y=frac_mn, group = Year > 1991), lwd = 1.5, method = "lm",se = TRUE)
+
+grid.arrange(sizeG,contigG,distG,shapeG)
+```
+
+## Evaluation distribution
+### Determine of an ANOVA or Kruskal-Wallis is more appropriate for the data
+```{r dist}
+#----1. Visualize if metrics are distributed normally----
+#area
+ggplot(area, aes(x=value, fill=class))+
+  ggtitle("Area") +
+  geom_density(alpha=0.3) +
+  scale_x_continuous(limits=c(0,750))
+
+#contig
+ggplot(contig, aes(x=value, fill=class))+
+  ggtitle("Contig")+
+  geom_density(alpha=0.3)
+
+#enn
+ggplot(enn, aes(x=value, fill=class))+
+  ggtitle("enn")+
+  geom_density(alpha=0.3)
+
+#frac
+ggplot(frac, aes(x=value, fill=class))+
+  ggtitle("Frac")+
+  geom_density(alpha=0.3)
+
+#INTERPRETATION: most don't have a normal distribution, the 500m pixels ensure several peaks
+
+#----2. Calculate skewness-----
+#If skewness value lies above +1 or below -1, data is highly #skewed.If it lies between +0.5 to -0.5, it is moderately #skewed. If the value is 0, then the data is symmetric
+
+#area
+skewness(area_1$value)
+skewness(area_2$value) 
+skewness(area_3$value) 
+skewness(area_4$value) 
+
+#contig
+skewness(contig_1$value) 
+skewness(contig_2$value) 
+skewness(contig_3$value) 
+skewness(contig_4$value) 
+
+#enn
+skewness(enn_1$value) 
+skewness(enn_2$value) 
+skewness(enn_3$value) 
+skewness(enn_4$value) 
+
+#frac
+skewness(frac_1$value) 
+skewness(frac_2$value) 
+skewness(frac_3$value) 
+skewness(frac_4$value) 
+
+#INTERPRETATION: Everything (besides circle) is skewed enough that they will need correction
+
+#----3. Plot using a qqplot----
+#area
+qqnorm(area_1$value);qqline(area_1$value, col=2)
+qqnorm(area_2$value);qqline(area_2$value, col=2)
+qqnorm(area_3$value);qqline(area_3$value, col=2)
+qqnorm(area_4$value);qqline(area_4$value, col=2)
+
+#contig
+qqnorm(contig_1$value);qqline(contig_1$value, col=2)
+qqnorm(contig_2$value);qqline(contig_2$value, col=2)
+qqnorm(contig_3$value);qqline(contig_3$value, col=2)
+qqnorm(contig_4$value);qqline(contig_4$value, col=2)
+
+#enn
+qqnorm(enn_1$value);qqline(enn_1$value, col=2)
+qqnorm(enn_2$value);qqline(enn_2$value, col=2)
+qqnorm(enn_3$value);qqline(enn_3$value, col=2)
+qqnorm(enn_4$value);qqline(enn_4$value, col=2)
+
+#frac
+qqnorm(frac_1$value);qqline(frac_1$value, col=2)
+qqnorm(frac_2$value);qqline(frac_2$value, col=2)
+qqnorm(frac_3$value);qqline(frac_3$value, col=2)
+qqnorm(frac_4$value);qqline(frac_4$value, col=2)
+
+#INTERPRETATION: Going to use Kruskal-Wallis
+```
+
+## Kruskal-Wallis Test
+```{r kw}
+#set up function
+calcKW = function(DFvar) {
+  #compute mean and standard deviation
+  DFvar %>%
+    group_by(Year) %>%
+    summarise(
+      count_year = n(),
+      mean_metric = mean(value, na.rm = TRUE),
+      sd_metric = sd(value, na.rm = TRUE),
+      var_metric = var(value, na.rm = TRUE)
+    )
+  
+  ##box plot to graphically represent difference
+  #Bplot = ggplot(DFvar, aes(x = Year, y = value, fill = Year)) +
+  #  geom_boxplot() +
+  #  theme_classic()
+  #plot(Bplot)
+  
+  #run the test
+  kw = kruskal.test(value~Year, data = DFvar)
+  return(kw)
+}
+
+#run function
+#area
+area_kw_1 = calcKW(area_1)
+#Kruskal-Wallis chi-squared = 82.887, df = 5, p-value < 2.2e-16
+area_kw_2 = calcKW(area_2)
+#Kruskal-Wallis chi-squared = 408.99, df = 5, p-value < 2.2e-16
+area_kw_3 = calcKW(area_3)
+#Kruskal-Wallis chi-squared = 352.3, df = 5, p-value < 2.2e-16
+area_kw_4 = calcKW(area_4)
+#Kruskal-Wallis chi-squared = 35.517, df = 5, p-value = 1.186e-06
+
+#contig
+contig_kw_1 = calcKW(contig_1)
+#Kruskal-Wallis chi-squared = 79.593, df = 5, p-value = 1.021e-15
+contig_kw_2 = calcKW(contig_2)
+#Kruskal-Wallis chi-squared = 412.9, df = 5, p-value < 2.2e-16
+contig_kw_3 = calcKW(contig_3)
+#Kruskal-Wallis chi-squared = 321.69, df = 5, p-value < 2.2e-16
+contig_kw_4 = calcKW(contig_4) 
+#Kruskal-Wallis chi-squared = 35.079, df = 5, p-value = 1.451e-06
+
+#enn
+enn_kw_1 = calcKW(enn_1)
+#Kruskal-Wallis chi-squared = 101.49, df = 5, p-value < 2.2e-16
+enn_kw_2 = calcKW(enn_2)
+#Kruskal-Wallis chi-squared = 1415.1, df = 5, p-value < 2.2e-16
+enn_kw_3 = calcKW(enn_3)
+#Kruskal-Wallis chi-squared = 1869.2, df = 5, p-value < 2.2e-16
+enn_kw_4 = calcKW(enn_4) 
+#Kruskal-Wallis chi-squared = 105.49, df = 5, p-value < 2.2e-16
+
+#frac
+frac_kw_1 = calcKW(frac_1)
+#Kruskal-Wallis chi-squared = 81.998, df = 5, p-value = 3.203e-16
+frac_kw_2 = calcKW(frac_2)
+#Kruskal-Wallis chi-squared = 342.19, df = 5, p-value < 2.2e-16
+frac_kw_3 = calcKW(frac_3)
+#Kruskal-Wallis chi-squared = 356.76, df = 5, p-value < 2.2e-16
+frac_kw_4 = calcKW(frac_4) 
+#Kruskal-Wallis chi-squared = 30.865, df = 5, p-value = 9.962e-06
+```
+
+## Figure 4. Dunn Test Plots
+```{r fig 4}
+#Run post hoc (Dunn test)
+#Dunn test shows the difference between each one of the years (and if it is stat sig)
+
+#----area----
+#Crop
+area_1_PT = dunnTest(value~Year,data=area_1,method="bh") #run
+area_1_DF = data.frame("Z" = area_1_PT$res$Z, "C" = area_1_PT$res$Comparison, "p" = area_1_PT$res$P.adj) #convert to df
+area_1_DF = area_1_DF[order(area_1_DF$C),]
+area_1_DF$sig = cut(area_1_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+area_1_DFs = area_1_DF[grep("1985 - ",area_1_DF$C),] #select only rows including 1985
+a1 = ggplot(data=area_1_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Crop Area") +
+  scale_y_continuous(limits = c(-14,4.6))
+
+#Barren/Grass/Shrubland
+area_2_PT = dunnTest(value~Year,data=area_2,method="bh") #run
+area_2_DF = data.frame("Z" = area_2_PT$res$Z, "C" = area_2_PT$res$Comparison, "p" = area_2_PT$res$P.adj) #convert to df
+area_2_DF = area_2_DF[order(area_2_DF$C),]
+area_2_DF$sig = cut(area_2_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+area_2_DFs = area_2_DF[grep("1985 - ",area_2_DF$C),] #select only rows including 1985
+a2 = ggplot(data=area_2_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Barren/Grass/Shrubland Area")  +
+  scale_y_continuous(limits = c(-14,4.6))
+
+#Built-up
+area_3_PT = dunnTest(value~Year,data=area_3,method="bh") #run
+area_3_DF = data.frame("Z" = area_3_PT$res$Z, "C" = area_3_PT$res$Comparison, "p"= area_3_PT$res$P.adj) #convert to df
+area_3_DF = area_3_DF[order(area_3_DF$C),]
+area_3_DF$sig = cut(area_3_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+area_3_DFs = area_3_DF[grep("1985 - ",area_3_DF$C),] #select only rows including 1985
+a3 = ggplot(data=area_3_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Built-up Area")  +
+  scale_y_continuous(limits = c(-14,4.6))
+
+#Forest
+area_4_PT = dunnTest(value~Year,data=area_4,method="bh") #run
+area_4_DF = data.frame("Z" = area_4_PT$res$Z, "C" = area_4_PT$res$Comparison, "p"= area_4_PT$res$P.adj) #convert to df
+area_4_DF = area_4_DF[order(area_4_DF$C),]
+area_4_DF$sig = cut(area_4_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+area_4_DFs = area_4_DF[grep("1985 - ",area_4_DF$C),] #select only rows including 1985
+a4 = ggplot(data=area_4_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Forest Area")  +
+  scale_y_continuous(limits = c(-14,4.6))
+
+grid.arrange(a1,a2,a3,a4,nrow=1)
+
+#----frac----
+#Crop
+frac_1_PT = dunnTest(value~Year,data=frac_1,method="bh") #run
+frac_1_DF = data.frame("Z" = frac_1_PT$res$Z, "C" = frac_1_PT$res$Comparison,"p"= frac_1_PT$res$P.adj) #convert to df
+frac_1_DF = frac_1_DF[order(frac_1_DF$C),]
+frac_1_DF$sig = cut(frac_1_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+frac_1_DFs = frac_1_DF[grep("1985 - ",frac_1_DF$C),] #select only rows including 1985
+s1 = ggplot(data=frac_1_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Crop Shape")+
+  scale_y_continuous(limits = c(-14.078,4.46))
+
+#Barren/Grass/Shurbland
+frac_2_PT = dunnTest(value~Year,data=frac_2,method="bh") #run
+frac_2_DF = data.frame("Z" = frac_2_PT$res$Z, "C" = frac_2_PT$res$Comparison,"p"= frac_2_PT$res$P.adj) #convert to df
+frac_2_DF = frac_2_DF[order(frac_2_DF$C),]
+frac_2_DF$sig = cut(frac_2_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+frac_2_DFs = frac_2_DF[grep("1985 - ",frac_2_DF$C),] #select only rows including 1985
+s2 = ggplot(data=frac_2_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Barren/Grass/Shrubland Shape")+
+  scale_y_continuous(limits = c(-14.078,4.46))
+
+#Built-up
+frac_3_PT = dunnTest(value~Year,data=frac_3,method="bh") #run
+frac_3_DF = data.frame("Z" = frac_3_PT$res$Z, "C" = frac_3_PT$res$Comparison,"p"= frac_3_PT$res$P.adj) #convert to df
+frac_3_DF = frac_3_DF[order(frac_3_DF$C),]
+frac_3_DF$sig = cut(frac_3_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+frac_3_DFs = frac_3_DF[grep("1985 - ",frac_3_DF$C),] #select only rows including 1985
+s3 = ggplot(data=frac_3_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Built-up Shape")+
+  scale_y_continuous(limits = c(-14.078,4.46))
+
+#Forest
+frac_4_PT = dunnTest(value~Year,data=frac_4,method="bh") #run
+frac_4_DF = data.frame("Z" = frac_4_PT$res$Z, "C" = frac_4_PT$res$Comparison,"p"= frac_4_PT$res$P.adj) #convert to df
+frac_4_DF = frac_4_DF[order(frac_4_DF$C),]
+frac_4_DF$sig = cut(frac_4_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+frac_4_DFs = frac_4_DF[grep("1985 - ",frac_4_DF$C),] #select only rows including 1985
+s4 = ggplot(data=frac_4_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Forest Shape")+
+  scale_y_continuous(limits = c(-14.078,4.46))
+
+grid.arrange(s1,s2,s3,s4,nrow=1)
+
+#---enn----
+#Crop
+enn_1_PT = dunnTest(value~Year,data=enn_1,method="bh") #run
+enn_1_DF = data.frame("Z" = enn_1_PT$res$Z, "C" = enn_1_PT$res$Comparison,"p"= enn_1_PT$res$P.adj) #convert to df
+enn_1_DF = enn_1_DF[order(enn_1_DF$C),]
+enn_1_DF$sig = cut(enn_1_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+enn_1_DFs = enn_1_DF[grep("1985 - ",enn_1_DF$C),] #select only rows including 1985
+d1 = ggplot(data=enn_1_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  scale_y_continuous(limits=c(-7.25,32)) +
+  ggtitle("Crop Distance")
+
+#Barren/Grass/Shrub
+enn_2_PT = dunnTest(value~Year,data=enn_2,method="bh") #run
+enn_2_DF = data.frame("Z" = enn_2_PT$res$Z, "C" = enn_2_PT$res$Comparison,"p"= enn_2_PT$res$P.adj) #convert to df
+enn_2_DF = enn_2_DF[order(enn_2_DF$C),]
+enn_2_DF$sig = cut(enn_2_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+enn_2_DFs = enn_2_DF[grep("1985 - ",enn_2_DF$C),] #select only rows including 1985
+d2 = ggplot(data=enn_2_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  scale_y_continuous(limits=c(-7.25,32)) +
+  ggtitle("Barren/Grass/Shrubland Distance")
+
+#Built
+enn_3_PT = dunnTest(value~Year,data=enn_3,method="bh") #run
+enn_3_DF = data.frame("Z" = enn_3_PT$res$Z, "C" = enn_3_PT$res$Comparison,"p"= enn_3_PT$res$P.adj) #convert to df
+enn_3_DF = enn_3_DF[order(enn_3_DF$C),]
+enn_3_DF$sig = cut(enn_3_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+enn_3_DFs = enn_3_DF[grep("1985 - ",enn_3_DF$C),] #select only rows including 1985
+d3 = ggplot(data=enn_3_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  scale_y_continuous(limits=c(-7.25,32)) +
+  ggtitle("Built-up Distance")
+
+#Forest
+enn_4_PT = dunnTest(value~Year,data=enn_4,method="bh") #run
+enn_4_DF = data.frame("Z" = enn_4_PT$res$Z, "C" = enn_4_PT$res$Comparison,"p"= enn_4_PT$res$P.adj) #convert to df
+enn_4_DF = enn_4_DF[order(enn_4_DF$C),]
+enn_4_DF$sig = cut(enn_4_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+enn_4_DFs = enn_4_DF[grep("1985 - ",enn_4_DF$C),] #select only rows including 1985
+d4 = ggplot(data=enn_4_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  scale_y_continuous(limits=c(-7.25,32)) +
+  ggtitle("Forest Distance")
+
+grid.arrange(d1,d2,d3,d4,nrow=1)
+
+#----contig----
+#Crop
+contig_1_PT = dunnTest(value~Year,data=contig_1,method="bh") #run
+contig_1_DF = data.frame("Z" = contig_1_PT$res$Z, "C" = contig_1_PT$res$Comparison,"p"= contig_1_PT$res$P.adj) #convert to df
+contig_1_DF = contig_1_DF[order(contig_1_DF$C),]
+contig_1_DF$sig = cut(contig_1_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+contig_1_DFs = contig_1_DF[grep("1985 - ",contig_1_DF$C),] #select only rows including 1985
+c1 = ggplot(data=contig_1_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  scale_y_continuous(limits=c(-13.45,4.28))+
+  ggtitle("Crop Connectivity")
+
+#Barren/Grass/Shrub
+contig_2_PT = dunnTest(value~Year,data=contig_2,method="bh") #run
+contig_2_DF = data.frame("Z" = contig_2_PT$res$Z, "C" = contig_2_PT$res$Comparison,"p"= contig_2_PT$res$P.adj) #convert to df
+contig_2_DF = contig_2_DF[order(contig_2_DF$C),]
+contig_2_DF$sig = cut(contig_2_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+contig_2_DFs = contig_2_DF[grep("1985 - ",contig_2_DF$C),] #select only rows including 1985
+c2 = ggplot(data=contig_2_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  scale_y_continuous(limits=c(-13.45,4.28))+
+  ggtitle("Barren/Grass/Shrubland Connectivity")
+
+#Built
+contig_3_PT = dunnTest(value~Year,data=contig_3,method="bh") #run
+contig_3_DF = data.frame("Z" = contig_3_PT$res$Z, "C" = contig_3_PT$res$Comparison,"p"= contig_3_PT$res$P.adj) #convert to df
+contig_3_DF = contig_3_DF[order(contig_3_DF$C),]
+contig_3_DF$sig = cut(contig_3_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+contig_3_DFs = contig_3_DF[grep("1985 - ",contig_3_DF$C),] #select only rows including 1985
+c3 = ggplot(data=contig_3_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  scale_y_continuous(limits=c(-13.45,4.28))+
+  ggtitle("Built Connectivity")
+
+#Forest
+contig_4_PT = dunnTest(value~Year,data=contig_4,method="bh") #run
+contig_4_DF = data.frame("Z" = contig_4_PT$res$Z, "C" = contig_4_PT$res$Comparison,"p"= contig_4_PT$res$P.adj) #convert to df
+contig_4_DF = contig_4_DF[order(contig_4_DF$C),]
+contig_4_DF$sig = cut(contig_4_DF$p, c(-Inf,0.05,Inf), c("significant","not significant"))
+
+#plot
+contig_4_DFs = contig_4_DF[grep("1985 - ",contig_4_DF$C),] #select only rows including 1985
+c4 = ggplot(data=contig_4_DFs, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  scale_y_continuous(limits=c(-13.45,4.28))+
+  ggtitle("Forest Connectivity")
+
+grid.arrange(c1,c2,c3,c4,nrow=1)
+```
+
+## Table 4: Environmental Variable Percent Change
+```{r table 4}
+#add year to environmental variable DF
+ev1985$Year = 1985
+ev1990$Year = 1990
+ev1995$Year = 1995
+ev2000$Year = 2000
+ev2005$Year = 2005
+ev2010$Year = 2010
+
+#combine
+evDF = rbind(ev1985,ev1990,ev1995,ev2000,ev2005,ev2010)
+
+#remove NDVI and EVI from DF
+evDF = subset(evDF, select = - c(EVI, NDVI))
+
+#make class and year a factor
+evDF$Year = as.factor(evDF$Year)
+evDF$gridcode = as.factor(evDF$gridcode)
+
+evDF_mean = group_by(evDF,Year,gridcode) %>% summarize(meanBright = mean(brightness),
+                                                     meanGreen = mean(greenness),
+                                                     meanWet = mean(wetness))
+#separate out the classes
+evDF_mean_1 = subset(evDF_mean,gridcode==1)
+evDF_mean_2 = subset(evDF_mean,gridcode==2)
+evDF_mean_3 = subset(evDF_mean,gridcode==3)
+evDF_mean_4 = subset(evDF_mean,gridcode==4)
+
+#function to calculate percent change
+#% change = (New value - Original value)/Original value
+#positive = increase, negative = decrease
+#[row,column]
+
+calcPC = function(DF) {
+  #compute value for each metric
+
+  #brightness
+  B1985 = DF[1,3]
+  pcB85_90 = (DF[2,3]-B1985)/B1985
+  pcB85_95 = (DF[3,3]-B1985)/B1985
+  pcB85_00 = (DF[4,3]-B1985)/B1985
+  pcB85_05 = (DF[5,3]-B1985)/B1985
+  pcB85_10 = (DF[6,3]-B1985)/B1985
+  
+  #greenness
+  G1985 = DF[1,4]
+  pcG85_90 = (DF[2,4]-G1985)/G1985
+  pcG85_95 = (DF[3,4]-G1985)/G1985
+  pcG85_00 = (DF[4,4]-G1985)/G1985
+  pcG85_05 = (DF[5,4]-G1985)/G1985
+  pcG85_10 = (DF[6,4]-G1985)/G1985
+  
+  #wetness
+  W1985 = DF[1,5]
+  pcW85_90 = (DF[2,5]-W1985)/W1985
+  pcW85_95 = (DF[3,5]-W1985)/W1985
+  pcW85_00 = (DF[4,5]-W1985)/W1985
+  pcW85_05 = (DF[5,5]-W1985)/W1985
+  pcW85_10 = (DF[6,5]-W1985)/W1985
+  
+  #combine into output DF
+  out = data.frame(year = c("1985-1990","1985-1995","1985-2000","1985-2005","1985-2010"),
+    pcBright = c(pcB85_90$meanBright,pcB85_95$meanBright,pcB85_00$meanBright,pcB85_05$meanBright,pcB85_10$meanBright),
+    pcGreen = c(pcG85_90$meanGreen,pcG85_95$meanGreen,pcG85_00$meanGreen,pcG85_05$meanGreen,pcG85_10$meanGreen),
+    pcWet = c(pcW85_90$meanWet,pcW85_95$meanWet,pcW85_00$meanWet,pcW85_05$meanWet,pcW85_10$meanWet))
+  
+  #return output
+  return(out)
+}
+
+cropPC = calcPC(evDF_mean_1)
+bgsPC = calcPC(evDF_mean_2)
+urbanPC = calcPC(evDF_mean_3)
+forestPC = calcPC(evDF_mean_4)
+
+#print tables
+print(cropPC)
+print(bgsPC)
+print(urbanPC)
+print(forestPC)
+
+#export tables
+#write.csv(cropPC,'./Results/PercentChange/cropPC.csv')
+#write.csv(bgsPC,'./Results/PercentChange/bgsPC.csv')
+#write.csv(urbanPC,'./Results/PercentChange/urbanPC.csv')
+#write.csv(forestPC,'./Results/PercentChange/forestPC.csv')
+```
+
+## Supplemental Information Plots
+```{r SI Dunn Plot}
+#full dunn test plots in statistical analysis R code
+#need to run kw module first
+
+#----area----
+#Crop
+ggplot(data=area_1_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Crop Area") 
+
+#Barren/Grass/Shrubland
+ggplot(data=area_2_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Barren/Grass/Shrubland Area") 
+
+#Built-up
+ggplot(data=area_3_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Built-up Area")
+
+#Forest
+ggplot(data=area_4_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Forest Area") 
+
+#---frac----
+#Crop
+ggplot(data=frac_1_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Crop Shape") 
+
+#Barren/Grass/Shrubland
+ggplot(data=frac_2_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Barren/Grass/Shrubland Shape")
+
+#Built-up
+ggplot(data=frac_3_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Built-up Shape")
+
+#Forest
+ggplot(data=frac_4_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Forest Shape")
+
+#----enn----
+#Crop
+ggplot(data=enn_1_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Crop Distribution")
+
+#Barren/Grass/Shrubland
+ggplot(data=enn_2_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Barren/Grass/Shrubland Distribution")
+
+#Built-up
+ggplot(data=enn_3_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Built-up Distribution")
+
+#Forest
+ggplot(data=enn_4_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Forest Distribution")
+
+#----contig----
+#Crop
+ggplot(data=enn_1_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Crop Connectivity")
+
+#Barren/Grass/Shrubland
+ggplot(data=contig_2_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Barren/Grass/Shrubland Connectivity")
+
+#Built-up
+ggplot(data=contig_3_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  ggtitle("Built Connectivity")
+
+#Forest
+ggplot(data=contig_4_DF, aes(x=C,y=Z,fill=sig))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=12),axis.title.x=element_blank(),
+        axis.text.y = element_text(size=10),
+        legend.position = "none") +
+  geom_bar(stat="identity",color="#A7AFB2")+
+  scale_fill_manual(values=c("#373D3F","#FFFFFF"))+
+  #scale_y_continuous(limits=c(-20,35))+
+  ggtitle("Forest Connectivity")
+
+```
+
+```{r SI CHIRPS}
+#rename columns
+colnames(precipMean) = c("dayIndex", "precipitation", "startTime")
+
+#convert system index to date
+precipMean$date = as.Date.character(precipMean$dayIndex,format='%Y%m%d')
+precipMean$month = format(precipMean$date, format = "%m")
+precipMean$year = format(precipMean$date,format="%Y")
+
+#plot raw data over time
+ggplot(data = precipMean, aes(x=date,y=precipitation)) +
+  geom_line()
+
+#Yearly Average
+precipMean %>%
+  ggplot(aes(x = month, y = precipitation)) +
+      geom_bar(stat = "identity", fill = "black") +
+  facet_wrap(~ year, ncol = 4) +
+      labs(y = "Average Daily Precipitation (mm)",
+           x = "Month") + theme_bw()
+
+#average by year
+avgYear = aggregate(precipitation ~ year, precipMean, mean)
+
+#Subset to the same years as LULC classification and export table
+exportAvg = subset(avgYear, year==1985 | year==1990 | year==1995 | year==2000 | year==2005 | year==2010)
+write.csv(exportAvg,'./Data/EnvironVars/Precip/CHIRPS_avgYearly.csv')
+
+```
