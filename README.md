@@ -13,7 +13,7 @@ Python 2.7.16/ArcMap 10.7.1 (arcpy)
 
 # Data
 
-### Accessed via Google Earth Engine 
+### Accessed via Google Earth Engine: 
 USGS Landsat 5 TM Collection 1 Tier 1 Raw Scenes
 
 DMSP OLS: Global Radiance-Calibrated Nighttime Lights Version 4, Defense Meteorological Program Operational Linescan System
@@ -22,8 +22,9 @@ SRTM Digital Elevation Data 30m
 
 CHIRPS Daily: Climate Hazards Group InfraRed Precipitation with Station Data (version 2.0)
 
-### Land Use/Land Cover Classification
-Land Use/Land Cover (LULC) classifications TIFs available in the "LULC" folder.
+### Land Use/Land Cover Classification:
+Land Use/Land Cover (LULC) classification TIFs available in the "LULC" folder. In the figure below light tan is agricultural lands, olive green is barren/grass/shrublands, fir green is forest lands, black is built-up lands, and blue is water.
+
 ![alt text](images/CubaLULC_2020.03.06.png "LULC Maps")
 
 # Analysis
